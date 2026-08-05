@@ -47,7 +47,7 @@ function processMessage(payload: WebhookPayload): void {
 
 			console.log(`Incoming WhatsApp message from ${from}: ${text}`);
 
-			getAgentReply(text)
+			getAgentReply(text, from)
 				.then(async (reply) => {
 					await sendWhatsAppMessage(from, reply);
 					console.log(`Sent reply to ${from}: ${reply}`);
