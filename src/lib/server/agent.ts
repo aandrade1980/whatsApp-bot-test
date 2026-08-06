@@ -13,13 +13,14 @@
 
 import { env } from '$env/dynamic/private';
 import { redis } from './redis';
+import { DEFAULT_MODEL, getUserModel } from './user-config';
 
 const GROQ_API_KEY = env.GROQ_API_KEY;
 
-// llama-3.1-8b-instant is fast and free — good for prototyping.
-// Swap to "llama-3.3-70b-versatile" if you want stronger reasoning
-// at a bit more latency, still free tier.
-const MODEL = 'llama-3.1-8b-instant';
+// Max tokens per reply. Expose via env so you can raise/lower without a
+// redeploy. WhatsApp caps a single text message at 4096 chars, so values
+// much above ~1500 are wasted on long English replies.
+const MAX_TOKENS = Number(env.GROQ_MAX_TOKENS ?? 500);
 
 // How many prior turns to feed back to the model. Each "turn" is two
 // messages (user + assistant), so 10 ≈ 5 exchanges. Groq's context
@@ -114,15 +115,10 @@ async function popMessage(from: string): Promise<void> {
 }
 
 export async function getAgentReply(userMessage: string, from: string): Promise<string> {
+	const model = (await getUserModel(from)) ?? DEFAULT_MODEL;
 	const history = await getHistory(from);
 	history.push({ role: 'user', content: userMessage });
 	await pushMessage(from, { role: 'user', content: userMessage });
-
-	// Keep history bounded for the request payload too — in-memory store
-	// already trimmed in pushMessage; for Redis we only persisted the latest
-	// MAX_HISTORY_TURNS, but history here may contain one extra (the just-pushed
-	// user turn beyond cap on the rare edge). Trim defensively in-place.
-	while (history.length > MAX_HISTORY_TURNS) history.shift();
 
 	const messages: ChatMessage[] = [{ role: 'system', content: SYSTEM_PROMPT }, ...history];
 
@@ -133,8 +129,8 @@ export async function getAgentReply(userMessage: string, from: string): Promise<
 			Authorization: `Bearer ${GROQ_API_KEY}`
 		},
 		body: JSON.stringify({
-			model: MODEL,
-			max_tokens: 500,
+			model,
+			max_tokens: MAX_TOKENS,
 			messages
 		})
 	});
@@ -142,7 +138,7 @@ export async function getAgentReply(userMessage: string, from: string): Promise<
 	const data = await res.json();
 
 	if (!res.ok) {
-		console.error('Groq API error:', data);
+		console.error('Groq API error (model=' + model + '):', data);
 		// Roll back the user turn we just appended so a failed call doesn't
 		// pollute the next attempt's context.
 		await popMessage(from);
@@ -153,4 +149,14 @@ export async function getAgentReply(userMessage: string, from: string): Promise<
 	await pushMessage(from, { role: 'assistant', content: reply });
 
 	return reply;
+}
+
+// Wipes the per-user rolling conversation history. Used by the /clear
+// WhatsApp command. Per-user model override is untouched.
+export async function clearConversation(from: string): Promise<void> {
+	if (redis) {
+		await redis.del(redisKey(from));
+		return;
+	}
+	memoryStore.delete(from);
 }

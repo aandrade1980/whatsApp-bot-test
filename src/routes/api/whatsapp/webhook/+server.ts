@@ -6,6 +6,7 @@ import { json, type RequestHandler } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { getAgentReply } from '$lib/server/agent';
 import { sendWhatsAppMessage } from '$lib/server/whatsapp';
+import { handleCommand } from '$lib/server/commands';
 
 const VERIFY_TOKEN = env.WHATSAPP_VERIFY_TOKEN;
 
@@ -47,10 +48,20 @@ function processMessage(payload: WebhookPayload): void {
 
 			console.log(`Incoming WhatsApp message from ${from}: ${text}`);
 
-			getAgentReply(text, from)
-				.then(async (reply) => {
-					await sendWhatsAppMessage(from, reply);
-					console.log(`Sent reply to ${from}: ${reply}`);
+			const send = async (reply: string) => {
+				await sendWhatsAppMessage(from, reply);
+				console.log(`Sent reply to ${from}: ${reply}`);
+			};
+
+			// Slash commands (e.g. /model, /clear) short-circuit the agent.
+			handleCommand(text, from)
+				.then(async (cmd) => {
+					if (cmd?.handled) {
+						await send(cmd.reply);
+						return;
+					}
+					const reply = await getAgentReply(text, from);
+					await send(reply);
 				})
 				.catch((err) => console.error(`Failed to reply to ${from}:`, err));
 		} else if (value?.statuses) {
