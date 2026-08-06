@@ -18,11 +18,14 @@ import { redis } from './redis';
 // If a user wants a model that isn't listed, they can still set it via
 // /model <name> --force; the agent will rely on Groq's own validation
 // to reject truly unknown models.
+// As of 2026-08, Groq's production text-generation models. Replace entries
+// here when Groq deprecates a model — check https://console.groq.com/docs/deprecations.
 export const KNOWN_MODELS = [
+	'openai/gpt-oss-20b',
+	'openai/gpt-oss-120b',
+	'qwen/qwen3.6-27b',
 	'llama-3.1-8b-instant',
-	'llama-3.3-70b-versatile',
-	'llama-3.1-70b-versatile',
-	'mixtral-8x7b-32768'
+	'llama-3.3-70b-versatile'
 ] as const;
 
 // TTL mirrors conversation history so the override dies when memory does.
@@ -59,4 +62,7 @@ export async function clearUserModel(from: string): Promise<void> {
 }
 
 // Default model used when no env and no per-user override is set.
-export const DEFAULT_MODEL = env.GROQ_MODEL ?? 'llama-3.1-8b-instant';
+// Groq announced llama-3.1-8b-instant shutdown for 2026-08-16, so we default
+// to its recommended replacement: openai/gpt-oss-20b (fast, free-tier friendly).
+// Override per deployment via GROQ_MODEL.
+export const DEFAULT_MODEL = env.GROQ_MODEL ?? 'openai/gpt-oss-20b';
